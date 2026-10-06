@@ -59,13 +59,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # The kit ships with an empty registry. Until a source is added, there
+      # is nothing to scrape, and a run would only commit an empty run record.
+      - name: Are any sources registered?
+        id: sources
+        run: |
+          python -c "from src.sources import in_run_order; print('any=' + str(any(True for _ in in_run_order(is_ci=True))).lower())" >> "$GITHUB_OUTPUT"
+
       - name: Install Playwright's browser
+        if: steps.sources.outputs.any == 'true'
         # Sources registered `kind: playwright` drive a real browser. Without
         # this they fail in CI while working locally, which is exactly the kind
         # of silent partial coverage the run record exists to expose.
         run: python -m playwright install --with-deps chromium
 
       - name: Run scraper
+        if: steps.sources.outputs.any == 'true'
         run: |
           mkdir -p logs data/runs data/agent_reports
           python scrape.py ${{ inputs.force && '--force' || '' }}
@@ -82,6 +91,7 @@ jobs:
 
       - name: Commit and push
         id: push
+        if: steps.sources.outputs.any == 'true'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
