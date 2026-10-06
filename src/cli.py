@@ -309,16 +309,20 @@ def cmd_adapters(args) -> int:
                            "params": a.params} for a in available.values()], indent=2))
         return 0
     for a in sorted(available.values(), key=lambda a: a.name):
-        print(f"{a.name:<14}{a.kind:<12}{a.summary}")
+        print(f"{a.name:<16}{a.kind:<12}{a.summary}")
         for param, meaning in a.params.items():
-            print(f"{'':<26}{DOT} {param}: {meaning}")
+            print(f"{'':<28}{DOT} {param}: {meaning}")
     return 0
 
 
 def cmd_detect(args) -> int:
     """Fetch a page and say which adapter, if any, fits it."""
-    from src.detect import detect
-    matches = detect(args.url)
+    from src.detect import DetectError, detect
+    try:
+        matches = detect(args.url)
+    except DetectError as e:
+        print(f"{BAD} could not read {args.url}: {e}")
+        return 2
     if args.json:
         print(json.dumps([m.to_dict() for m in matches], indent=2))
         return 0 if matches else 1

@@ -10,7 +10,7 @@ Each module here defines, at module level:
     ADAPTER = "tribe"            # the name a registry file uses
     KIND = "requests"            # or "playwright"
     CLASS = "TribeEventsAdapter" # the scraper class in the module
-    SIGNATURES = [...]           # strings `cal detect` looks for in a page
+    SIGNATURES = [...]           # strings or compiled regexes `cal detect` looks for in a page
     PARAMS = {...}               # the registry `params` it accepts, name -> meaning
 
 The class's constructor takes `source_name`, `url`, `venue` (a dict of

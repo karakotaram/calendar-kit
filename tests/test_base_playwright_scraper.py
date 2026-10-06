@@ -4,7 +4,9 @@
 challenge, is still an HTML page; it parsed as zero listings and the run
 recorded "ok, 0 events". Six sources sat like that in CI for weeks.
 
-These use a fake page, so no browser is launched.
+It must also launch headless unless a source opts into a visible window.
+
+These use a fake page (and a fake launcher), so no browser is launched.
 """
 from __future__ import annotations
 
@@ -117,3 +119,102 @@ def test_each_run_starts_with_a_clean_record():
     page.statuses[url] = 200
     assert scraper.run() == []
     assert scraper.navigations == [(url, url, 200)]
+
+
+# --------------------------------------------------------------------------- #
+# A visible browser window is opt-in
+# --------------------------------------------------------------------------- #
+
+class _Launcher:
+    """Stands in for sync_playwright(): records how the browser was launched."""
+
+    def __init__(self):
+        self.launched, self.routes = {}, []
+        launcher = self
+
+        class _Context:
+            def route(self, pattern, handler):
+                launcher.routes.append(pattern)
+
+            def new_page(self):
+                return object()
+
+        class _Browser:
+            def new_context(self, **options):
+                launcher.context_options = options
+                return _Context()
+
+        class _Chromium:
+            def launch(self, **options):
+                launcher.launched = options
+                return _Browser()
+
+        class _Playwright:
+            chromium = _Chromium()
+
+        self._playwright = _Playwright()
+
+    def __call__(self):
+        return self
+
+    def start(self):
+        return self._playwright
+
+
+class _Bare(BasePlaywrightScraper):
+    def scrape_events(self):
+        return []
+
+
+def _launch(monkeypatch, scraper) -> _Launcher:
+    import playwright.sync_api
+
+    launcher = _Launcher()
+    monkeypatch.setattr(playwright.sync_api, "sync_playwright", launcher)
+    scraper.setup_browser()
+    return launcher
+
+
+def test_the_browser_is_headless_unless_a_source_opts_in(monkeypatch):
+    """A visible window was a per-source exception Cambridge's owner chose for
+    two bookstores. It must never become anyone's default: a scraper that does
+    not ask for one gets a headless browser with its own user-agent."""
+    scraper = _Bare(source_name="Fake Venue", source_url="https://venue.example/events")
+    assert scraper.headless is True and scraper.user_agent is None
+
+    launched = _launch(monkeypatch, scraper)
+
+    assert launched.launched["headless"] is True
+    assert "user_agent" not in launched.context_options, "the browser's own, honest user-agent"
+    for flag in ("--disable-blink-features=AutomationControlled", "--enable-automation"):
+        assert flag not in launched.launched["args"]
+
+
+def test_a_window_is_opened_only_when_asked_for(monkeypatch):
+    """headless=False opens a window that behaves like an ordinary browser, so
+    it does not block the page's own assets (bot checks load theirs)."""
+    scraper = _Bare(source_name="Fake Venue", source_url="https://venue.example/events", headless=False)
+    launched = _launch(monkeypatch, scraper)
+    assert launched.launched["headless"] is False
+    assert launched.routes == []
+
+
+def test_every_playwright_adapter_defaults_to_headless():
+    """Each browser-driven adapter, built from a registry row with no params,
+    runs headless; a window needs a human to set its opt-in param."""
+    import inspect
+
+    from src import adapters
+
+    checked = 0
+    for info in adapters.available().values():
+        if info.kind != "playwright":
+            continue
+        required = [n for n, p in inspect.signature(info.cls).parameters.items()
+                    if p.kind is p.KEYWORD_ONLY and p.default is p.empty]
+        if required:
+            continue
+        scraper = info.cls(source_name="Fake Venue", url="https://venue.example/events", venue={})
+        assert scraper.headless is True, f"{info.name} opens a window by default"
+        checked += 1
+    assert checked, "no playwright adapter was checked"

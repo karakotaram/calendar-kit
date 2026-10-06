@@ -15,9 +15,11 @@ class ScrapeRefusedError(RuntimeError):
     """The venue answered with an error status and the scrape found nothing."""
 
 
-# Titles of bot-check interstitials (Cloudflare and similar)
+# Titles of bot-check interstitials (Cloudflare and similar). Shared with
+# `cal detect`, which reports such a page as blocked instead of matching it.
 CHALLENGE_TITLES = ("just a moment", "performing security verification",
-                    "attention required", "access denied")
+                    "attention required", "access denied", "verifying you are human",
+                    "please wait while we verify", "ddos-guard")
 
 
 class BasePlaywrightScraper(ABC):
@@ -40,10 +42,15 @@ class BasePlaywrightScraper(ABC):
         as one — Porter Square Books returns 403 for the spoofed UA and 200 for
         the browser's own, from the same headless Chromium.
 
-        headless=False opens a visible window. Some venues' Cloudflare settings
-        refuse a browser that announces itself as HeadlessChrome but serve an
-        ordinary one. A visible source needs a display, so it must be registered
-        runs_in_ci=False and runs through scrape_local.py.
+        headless defaults to True, and headless=False is opt-in: a human
+        chooses it for one source (an adapter's `visible_browser: true` registry
+        param), never a scraper on its own. It opens a visible window. Some
+        venues' Cloudflare settings refuse a browser that announces itself as
+        HeadlessChrome but serve an ordinary one; Cambridge Calendar used a
+        window for two bookstores at its owner's request. It is not a way around
+        a block a venue intends, and nothing here hides automation or solves a
+        challenge. A visible source needs a display, so it must be registered
+        runs_in_ci: false and runs through scrape_local.py.
         """
         self.source_name = source_name
         self.source_url = source_url
