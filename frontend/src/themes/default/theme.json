@@ -1,0 +1,6 @@
+{
+  "label": "Default",
+  "fonts": "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..900;1,14..32,400..700&display=swap",
+  "favicon": "favicon.svg",
+  "themeColor": "#0f172a"
+}

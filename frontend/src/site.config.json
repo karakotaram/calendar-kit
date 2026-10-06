@@ -1,0 +1,44 @@
+{
+  "$comment": "Generated from calendar.config.yaml by scripts/sync-config.mjs. Edit the YAML, not this file.",
+  "site": {
+    "name": "KQED Events",
+    "tagline": "Every public event in the Bay Area, in one calendar",
+    "url": ""
+  },
+  "region": {
+    "name": "Bay Area",
+    "timezone": "America/Los_Angeles",
+    "state": "CA",
+    "defaultCity": "San Francisco",
+    "cities": [
+      "San Francisco",
+      "Oakland",
+      "San Jose",
+      "Berkeley"
+    ],
+    "mapCenter": [
+      -122.27,
+      37.8
+    ],
+    "mapZoom": 9
+  },
+  "features": {
+    "map": true,
+    "chat": false,
+    "submissions": true,
+    "editorsPicks": true
+  },
+  "submissions": {
+    "formUrl": ""
+  },
+  "brand": {
+    "theme": "kqed"
+  },
+  "api": {
+    "baseUrl": ""
+  },
+  "home": {
+    "title": "KQED Events | Every public event in the Bay Area, in one calendar",
+    "description": "Every public event in the Bay Area, in one calendar: concerts, theater, talks, museum programs, family activities and free community events in San Francisco, Oakland, San Jose and Berkeley, collected daily from local venues."
+  }
+}

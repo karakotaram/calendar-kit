@@ -1,0 +1,59 @@
+/*
+ * Default theme: neutral, for any calendar without a brand of its own.
+ * Inter throughout, slate neutrals, one blue accent.
+ *
+ * Colors are HSL channels ("H S% L%") so Tailwind can apply opacity
+ * (`bg-primary/90`). Every text/background pair used by the app clears
+ * WCAG AA (4.5:1); check new values before changing them.
+ */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+
+  --primary: 224 76% 48%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 19% 35%;
+
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+
+  --destructive: 0 74% 42%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 224 76% 48%;
+
+  --radius: 0.25rem;
+
+  --success: 142 72% 29%;
+  --success-foreground: 0 0% 100%;
+
+  /* Unused by the `rule` masthead; defined so every theme has the full set. */
+  --masthead: 222 47% 11%;
+  --masthead-foreground: 0 0% 100%;
+
+  --sidebar-background: 0 0% 100%;
+  --sidebar-foreground: 222 47% 11%;
+  --sidebar-primary: 224 76% 48%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 210 40% 96%;
+  --sidebar-accent-foreground: 222 47% 11%;
+  --sidebar-border: 214 32% 91%;
+  --sidebar-ring: 224 76% 48%;
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-serif: var(--font-sans);
+  --font-display: var(--font-sans);
+}
