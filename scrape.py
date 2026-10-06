@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List
 
 from src import config
-from src.sources import USER_SUBMITTED, in_run_order, skipped_in_ci, preserved_always
+from src.sources import USER_SUBMITTED, blocked, in_run_order, skipped_in_ci, preserved_always
 from src.models.event import EventCreate, Event
 from src.utils.validator import EventValidator
 from src.utils.deduplicator import EventDeduplicator
@@ -180,11 +180,14 @@ class ScraperOrchestrator:
         Built before writing anything, so the gate judges exactly what would
         land on disk rather than a subset of it.
 
-        Three things survive a run:
+        Four things survive a run:
           - sources the registry says this pipeline does not produce (user
             submissions)
           - sources CI cannot reach, which are refreshed by scrape_local.py
           - sources whose scraper failed or returned nothing this run
+          - sources marked `status: blocked` (upcoming listings only), so
+            marking a venue blocked while asking it for a feed does not empty
+            its listings. A retired source's events are dropped.
 
         That last one is the important one. On Cambridge Calendar, Harvard Book
         Store started 403-ing from every IP, and because it only had "preserve"
@@ -195,7 +198,7 @@ class ScraperOrchestrator:
         # Preserve CI-blocked sources plus anything the registry says the
         # scrape pipeline does not produce (e.g. user submissions).
         sources_to_preserve = set(skipped_sources or []) | set(preserved_always())
-        recovered = set(barren_sources or []) - sources_to_preserve
+        recovered = (set(barren_sources or []) | set(blocked())) - sources_to_preserve
 
         stored = load_stored_events()
         preserved_events = [
@@ -216,7 +219,7 @@ class ScraperOrchestrator:
             for e in rescued:
                 by_source[e['source_name']] = by_source.get(e['source_name'], 0) + 1
             logger.warning(
-                "Kept existing events for sources that produced nothing this run: "
+                "Kept upcoming events for sources that failed, produced nothing, or are blocked: "
                 + ", ".join(f"{k} ({v})" for k, v in sorted(by_source.items())))
         preserved_events += rescued
 

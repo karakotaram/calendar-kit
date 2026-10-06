@@ -214,14 +214,15 @@ def compare(current: Fingerprint, history: list[dict]) -> list[Drift]:
 # --------------------------------------------------------------------------- #
 
 def _registered_names() -> Optional[set]:
-    """Names the registry still lists, or None if it cannot be read.
+    """Names the registry lists as active, or None if it cannot be read.
 
     Returning None rather than an empty set matters: a broken import must not
-    silently disable every disappearance check.
+    silently disable every disappearance check. Blocked and retired sources
+    are not run, so their absence is by design, not a disappearance.
     """
     try:
         from src.sources import SOURCES
-        return {s.name for s in SOURCES}
+        return {s.name for s in SOURCES if s.status == "active"}
     except Exception:
         return None
 

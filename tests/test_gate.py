@@ -150,7 +150,6 @@ def test_a_failed_source_keeps_its_upcoming_events(tmp_path, monkeypatch):
     "preserve" status inside CI, a local run deleted all 21 of its events, and
     Somerville Theatre's with them. A scrape that failed says nothing about
     whether a venue still has a programme."""
-    import json as _json
     from datetime import datetime, timedelta
 
     import scrape
@@ -250,3 +249,45 @@ def test_a_blank_or_unknown_gate_mode_still_enforces(value, monkeypatch, publish
     survivors = [e for e in published if e["source_name"] == "User Submitted"]
     d = gate.evaluate(survivors, previous=published)
     assert d.blocking
+
+
+def test_a_blocked_source_keeps_its_upcoming_listings_and_a_retired_one_does_not(monkeypatch):
+    """Marking a venue blocked while asking it for a feed must not empty its
+    listings; retiring it is the decision that removes them."""
+    from datetime import datetime, timedelta
+
+    import scrape
+    from src import sources
+    from src.sources import Source
+
+    future = (datetime.now() + timedelta(days=10)).replace(second=0, microsecond=0)
+    past = (datetime.now() - timedelta(days=10)).replace(second=0, microsecond=0)
+    registry = (Source("Walled Garden Books", "requests", adapter="jsonld", status="blocked"),
+                Source("Closed Club", "requests", adapter="jsonld", status="retired"),
+                sources.USER_SUBMITTED)
+    monkeypatch.setattr(sources, "SOURCES", registry)
+
+    def stored(source, when):
+        return {"id": f"{source}-{when}", "title": f"{source} night", "description": "d" * 25,
+                "start_datetime": when.isoformat(), "source_url": f"http://x/{source}",
+                "source_name": source}
+
+    on_disk = [stored("Walled Garden Books", future), stored("Walled Garden Books", past),
+               stored("Closed Club", future)]
+    monkeypatch.setattr(scrape, "load_stored_events", lambda *a, **k: on_disk)
+
+    published = scrape.ScraperOrchestrator().build_publish_set([], skipped_sources=[], barren_sources=[])
+    names = [(e["source_name"], e["start_datetime"]) for e in published]
+    assert names == [("Walled Garden Books", future.isoformat())]
+
+
+def test_drift_does_not_report_blocked_or_retired_sources_as_disappeared(monkeypatch):
+    from src import sources
+    from src.quality.fingerprint import _registered_names
+    from src.sources import Source
+
+    monkeypatch.setattr(sources, "SOURCES", (
+        Source("Live Venue", "requests", adapter="jsonld"),
+        Source("Walled Garden Books", "requests", adapter="jsonld", status="blocked"),
+        Source("Closed Club", "requests", adapter="jsonld", status="retired")))
+    assert _registered_names() == {"Live Venue"}

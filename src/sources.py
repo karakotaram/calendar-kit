@@ -164,6 +164,12 @@ def skipped_in_ci() -> list[str]:
     return [s.name for s in SOURCES if s.is_scraped and not s.runs_in_ci]
 
 
+def blocked() -> list[str]:
+    """Names marked `status: blocked`: not run, but their upcoming listings stay
+    until the venue offers a feed (docs/access-policy.md)."""
+    return [s.name for s in SOURCES if s.status == "blocked"]
+
+
 def preserved_always() -> list[str]:
     """Names never produced by the scrape pipeline; their events must survive."""
     return [s.name for s in SOURCES if s.kind == "manual"]
