@@ -1,0 +1,39 @@
+# Everything that makes this calendar yours. `/new-calendar` in Claude Code
+# walks through it; edit by hand any time. Code never hard-codes these facts:
+# it asks src/config.py, which reads this file.
+
+site:
+  name: KQED Events                  # masthead and page titles
+  short_name: KQEDEvents             # the scrapers' user-agent: letters and digits only
+  tagline: Every public event in the Bay Area, in one calendar
+  url: ""                            # the public site, e.g. https://events.example.org
+  contact_email: ""                  # put in the user-agent so venues can reach you
+
+region:
+  name: Bay Area
+  timezone: America/Los_Angeles      # IANA name. Every event time is stored as wall-clock time here.
+  state: CA
+  default_city: San Francisco        # used only when an event's own address names no city
+  cities:                            # the city quick views on the site, in this order
+    - San Francisco
+    - Oakland
+    - San Jose
+    - Berkeley
+  map_center: [-122.27, 37.80]       # longitude, latitude
+  map_zoom: 9
+
+features:
+  map: true                          # needs VITE_MAPBOX_TOKEN on the frontend
+  chat: false                        # an assistant over upcoming events; needs ANTHROPIC_API_KEY on the API
+  submissions: true                  # "Submit an event" links to the Google Form below
+  editors_picks: true                # an admin page for choosing featured events
+
+submissions:
+  form_url: ""                       # a Google Form; empty hides "Submit an event"
+  sheet_id: ""                       # that form's response sheet, read by sync_user_events.py
+
+brand:
+  theme: kqed                        # frontend/src/themes/<theme>
+
+api:
+  base_url: ""                       # the deployed API, e.g. https://<app>.up.railway.app

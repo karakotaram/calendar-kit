@@ -1,0 +1,187 @@
+"""Event data models"""
+import hashlib
+import re
+from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator
+from enum import Enum
+from src.config import TZ as LOCAL_TZ  # the region's zone, from calendar.config.yaml
+
+
+def _identity_title(title: str) -> str:
+    """Fold a title down to what identifies it, ignoring cosmetic churn."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", (title or "").lower())).strip()
+
+
+def event_identity(source_name: str, source_url: str,
+                   start_datetime: datetime, title: str) -> str:
+    """A stable id for one event occurrence, derived from its content.
+
+    The same occurrence scraped tomorrow gets the same id. That is what lets
+    anything accumulate on top of an event: click history joins across days, the
+    recommender sees real signal, Editor's Picks can key on identity instead of
+    matching titles, and `git diff data/events.json` becomes a readable changelog
+    of what actually changed rather than 9,000 lines of fresh UUIDs.
+
+    Before this existed, 269 of ~2,260 ids survived a nightly run — 88% churn.
+
+    The basis deliberately contains only fields that *identify the occurrence*.
+    Venue, description, image, and category are all fields we expect to get
+    better at extracting; folding them in would rotate every id the next time a
+    scraper improved. A rescheduled event does get a new id, which is correct —
+    it is a different occurrence, and the diff reads as one removal plus one
+    addition.
+    """
+    basis = "|".join([
+        source_name or "",
+        source_url or "",
+        to_local_naive(start_datetime).isoformat() if start_datetime else "",
+        _identity_title(title),
+    ])
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
+
+def to_local_naive(dt: Optional[datetime]) -> Optional[datetime]:
+    """Store every event time as naive local wall-clock time.
+
+    Every venue a calendar covers is physically in its region, so a published
+    start time is a local time whether or not the source bothered to say so.
+    Most scrapers hand back naive datetimes; a few sources stamp an offset.
+    Storing both kinds side by side means date comparisons raise TypeError, and
+    any consumer that converts to the viewer's timezone moves the stamped events
+    to a different clock time - and, for evening events, a different day - than
+    their naive neighbours.
+
+    So: an aware datetime is converted to the region's zone (calendar.config.yaml)
+    and stripped of its offset (same instant, now written as local wall clock),
+    and a naive one is left alone (already local by convention).
+    """
+    if dt is None or dt.tzinfo is None:
+        return dt
+    return dt.astimezone(LOCAL_TZ).replace(tzinfo=None)
+
+
+class EventCategory(str, Enum):
+    """Event category types"""
+    MUSIC = "music"
+    ARTS_CULTURE = "arts and culture"
+    FOOD_DRINK = "food and drink"
+    THEATER = "theater"
+    LECTURES = "lectures"
+    SPORTS = "sports"
+    COMMUNITY = "community"
+    OTHER = "other"
+
+
+class Event(BaseModel):
+    """Core event model matching PRD schema"""
+
+    # Core fields
+    id: str = Field(..., description="Unique identifier")
+    title: str = Field(..., max_length=200, description="Event name")
+    description: str = Field(..., max_length=2000, description="Event description")
+    start_datetime: datetime = Field(..., description="Event start time")
+    end_datetime: Optional[datetime] = Field(None, description="Event end time")
+    all_day: bool = Field(default=False, description="All-day event flag")
+
+    # Location information
+    venue_name: Optional[str] = Field(None, max_length=150, description="Venue name")
+    street_address: Optional[str] = Field(None, max_length=200, description="Street address")
+    city: Optional[str] = Field(None, max_length=50, description="City")
+    state: Optional[str] = Field(None, max_length=2, description="State abbreviation")
+    zip_code: Optional[str] = Field(None, max_length=10, description="ZIP code")
+    latitude: Optional[float] = Field(None, description="Latitude")
+    longitude: Optional[float] = Field(None, description="Longitude")
+
+    # Categorization & metadata
+    category: Optional[EventCategory] = Field(None, description="Event category")
+    tags: List[str] = Field(default_factory=list, description="Event tags")
+    family_friendly: bool = Field(default=False, description="Suitable for families with children")
+    age_restrictions: Optional[str] = Field(None, description="Age restrictions")
+    cost: Optional[str] = Field(None, description="Cost information")
+    registration_required: bool = Field(default=False, description="Registration required")
+
+    # Source attribution
+    source_url: str = Field(..., description="Original event page URL")
+    source_name: str = Field(..., description="Source website name")
+    scraped_at: datetime = Field(default_factory=datetime.utcnow, description="Scraping timestamp")
+    last_updated: datetime = Field(default_factory=datetime.utcnow, description="Last update time")
+
+    # Contact & additional info
+    contact_email: Optional[EmailStr] = Field(None, description="Contact email")
+    contact_phone: Optional[str] = Field(None, description="Contact phone")
+    website_url: Optional[str] = Field(None, description="Event website")
+    image_url: Optional[str] = Field(None, description="Event image URL")
+    recurring_pattern: Optional[dict] = Field(None, description="Recurrence information")
+    featured: bool = Field(default=False, description="Editor's pick / featured event")
+
+    @field_validator("start_datetime", "end_datetime")
+    @classmethod
+    def _store_times_as_local(cls, dt: Optional[datetime]) -> Optional[datetime]:
+        return to_local_naive(dt)
+
+    @classmethod
+    def from_create(cls, event: "EventCreate") -> "Event":
+        """Promote an EventCreate to an Event with a stable, content-derived id.
+
+        The only supported way to mint an Event id. Do not call uuid4() — see
+        event_identity().
+        """
+        return cls(
+            id=event_identity(event.source_name, event.source_url,
+                              event.start_datetime, event.title),
+            **event.model_dump(),
+        )
+
+    class Config:
+        use_enum_values = True
+
+
+class EventCreate(BaseModel):
+    """Model for creating new events (before ID assignment)"""
+    title: str = Field(..., max_length=200)
+    description: str = Field(..., max_length=2000)
+    start_datetime: datetime
+    end_datetime: Optional[datetime] = None
+    all_day: bool = False
+
+    venue_name: Optional[str] = None
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+    category: Optional[EventCategory] = None
+    tags: List[str] = Field(default_factory=list)
+    family_friendly: bool = False
+    age_restrictions: Optional[str] = None
+    cost: Optional[str] = None
+    registration_required: bool = False
+
+    source_url: str
+    source_name: str
+
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = None
+    website_url: Optional[str] = None
+    image_url: Optional[str] = None
+    recurring_pattern: Optional[dict] = None
+
+    @field_validator("start_datetime", "end_datetime")
+    @classmethod
+    def _store_times_as_local(cls, dt: Optional[datetime]) -> Optional[datetime]:
+        return to_local_naive(dt)
+
+
+class ScraperConfig(BaseModel):
+    """Configuration for individual event source scrapers"""
+    name: str = Field(..., description="Scraper name")
+    url: str = Field(..., description="Target URL")
+    priority: str = Field(..., description="Priority level: low, medium, high")
+    enabled: bool = Field(default=True, description="Scraper enabled status")
+    schedule_cron: str = Field(default="0 */6 * * *", description="Cron schedule")
+    custom_scraper: bool = Field(default=False, description="Uses custom scraper logic")
+    last_run: Optional[datetime] = Field(None, description="Last execution time")
+    success_rate: float = Field(default=0.0, description="Success rate percentage")

@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+*.log
+scrape_progress.log
+full_scrape.log
+full_scrape_v3.log
+
+# Environment
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Chromedriver
+chromedriver*
+
+# HTML output files
+data/*.html
+output/
+
+# Test files in /tmp
+/tmp/
+
+# Test cache
+.pytest_cache/
+
+# Generated HTML output (regenerated every scrape; see generate_html.py)
+data/*.html
+events.html
+user_submitted_audit.html
+*_audit.html
+
+# Rejected scrape runs — evidence for diagnosis, not repo content
+data/quarantine/

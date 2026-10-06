@@ -1,0 +1,396 @@
+"""Base Playwright scraper class for all event scrapers"""
+import logging
+import re
+from abc import ABC, abstractmethod
+from typing import List, Optional, Tuple
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
+
+from src.models.event import EventCreate
+
+logger = logging.getLogger(__name__)
+
+
+class ScrapeRefusedError(RuntimeError):
+    """The venue answered with an error status and the scrape found nothing."""
+
+
+# Titles of bot-check interstitials (Cloudflare and similar)
+CHALLENGE_TITLES = ("just a moment", "performing security verification",
+                    "attention required", "access denied")
+
+
+class BasePlaywrightScraper(ABC):
+    """
+    Abstract base class for Playwright-based event scrapers.
+
+    Advantages over Selenium:
+    - Faster execution with built-in auto-waiting
+    - More reliable element selection
+    - Lower memory footprint
+    - Better CI/CD compatibility
+    """
+
+    def __init__(self, source_name: str, source_url: str, user_agent: Optional[str] = None,
+                 headless: bool = True):
+        """user_agent defaults to the browser's own.
+
+        Do not spoof it without a reason. A UA claiming macOS on a browser whose
+        client hints say Linux is a *contradiction*, and bot protection reads it
+        as one — Porter Square Books returns 403 for the spoofed UA and 200 for
+        the browser's own, from the same headless Chromium.
+
+        headless=False opens a visible window. Some venues' Cloudflare settings
+        refuse a browser that announces itself as HeadlessChrome but serve an
+        ordinary one. A visible source needs a display, so it must be registered
+        runs_in_ci=False and runs through scrape_local.py.
+        """
+        self.source_name = source_name
+        self.source_url = source_url
+        self.user_agent = user_agent
+        self.headless = headless
+        self._browser = None
+        self._context = None
+        self._page = None
+        # Every navigation's (requested url, final url, HTTP status), so run()
+        # can tell "the venue has nothing listed" from "the venue refused us".
+        self.navigations: List[Tuple[str, str, Optional[int]]] = []
+
+    def setup_browser(self):
+        """Initialize the Playwright browser (headless unless the source needs a window)"""
+        if self._browser is None:
+            from playwright.sync_api import sync_playwright
+
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(
+                headless=self.headless,
+                args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-extensions',
+                    '--disable-software-rasterizer',
+                ]
+            )
+            context_options = {}
+            if self.user_agent:
+                context_options['user_agent'] = self.user_agent
+            self._context = self._browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                java_script_enabled=True,
+                **context_options,
+                bypass_csp=True,
+                extra_http_headers={
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'DNT': '1',
+                }
+            )
+            # Block unnecessary resources for faster loading - but not in a
+            # visible browser, which is meant to behave like an ordinary one.
+            # Bot checks load their own assets and may not complete without them.
+            if self.headless:
+                self._context.route("**/*.{png,jpg,jpeg,gif,svg,ico,woff,woff2}", lambda route: route.abort())
+            self._page = self._context.new_page()
+            logger.info(f"Playwright browser initialized for {self.source_name}")
+
+    def cleanup_browser(self):
+        """Close Playwright browser and cleanup resources"""
+        if self._page:
+            self._page.close()
+            self._page = None
+        if self._context:
+            self._context.close()
+            self._context = None
+        if self._browser:
+            self._browser.close()
+            self._browser = None
+        if hasattr(self, '_playwright') and self._playwright:
+            self._playwright.stop()
+            self._playwright = None
+        logger.info(f"Playwright browser closed for {self.source_name}")
+
+    @property
+    def page(self):
+        """Get the current page, setting up browser if needed"""
+        if self._page is None:
+            self.setup_browser()
+        return self._page
+
+    def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 30000):
+        """
+        Navigate to URL with smart waiting, and record the HTTP status.
+
+        Args:
+            url: URL to navigate to
+            wait_until: When to consider navigation complete
+                       - 'domcontentloaded': DOM is ready (faster)
+                       - 'load': Full page load including resources
+                       - 'networkidle': No network activity for 500ms (slowest but most complete)
+            timeout: Maximum wait time in milliseconds
+
+        Returns the Playwright response (None for same-document navigations).
+
+        The status used to be thrown away. A 403, or a Cloudflare challenge
+        page, is still a page: it parsed as zero listings and the run recorded
+        the source as "ok, 0 events". Six sources sat in that state in CI for
+        weeks with nothing to say they were being refused. `run()` now turns
+        "nothing found after a refused navigation" into a failure.
+        """
+        response = self.page.goto(url, wait_until=wait_until, timeout=timeout)
+        status = getattr(response, "status", None) if response is not None else None
+        final_url = getattr(response, "url", None) or url
+        self.navigations.append((url, final_url, status))
+        if status is not None and status >= 400:
+            logger.warning(f"{self.source_name}: HTTP {status} for {final_url}")
+        return response
+
+    def wait_past_challenge(self, timeout_s: int = 30) -> None:
+        """Wait for a bot-check interstitial to clear on its own, or fail.
+
+        Nothing here interacts with a challenge: no clicks, no solving. If the
+        page is still "Just a moment..." after the wait, the source is refused,
+        and saying so beats parsing the interstitial as an empty listing.
+        """
+        deadline = timeout_s * 1000
+        waited = 0
+        while any(marker in (self.page.title() or "").lower() for marker in CHALLENGE_TITLES):
+            if waited >= deadline:
+                raise ScrapeRefusedError(
+                    f"{self.source_name}: still on a bot-check page after {timeout_s}s "
+                    f"({self.page.title()!r} at {self.page.url})")
+            self.page.wait_for_timeout(1000)
+            waited += 1000
+
+    def refused_navigations(self) -> List[Tuple[str, str, int]]:
+        """Navigations in this run that the server answered with an error status."""
+        return [(url, final, status) for url, final, status in self.navigations
+                if status is not None and status >= 400]
+
+    def wait_for_selector(self, selector: str, timeout: int = 10000, state: str = "visible"):
+        """
+        Wait for element to appear.
+
+        Args:
+            selector: CSS selector or XPath
+            timeout: Maximum wait time in milliseconds
+            state: Element state to wait for ('attached', 'detached', 'visible', 'hidden')
+        """
+        return self.page.wait_for_selector(selector, timeout=timeout, state=state)
+
+    def wait_for_stable_count(self, selector: str, *, timeout: int = 20000,
+                              settle_ms: int = 700, min_count: int = 1) -> int:
+        """Wait until the number of matching elements stops growing.
+
+        `wait_for_selector` returns as soon as the *first* match appears, which
+        on a page that renders progressively means reading a partial list. That
+        is not a hypothetical: the Longfellow House calendar yielded 54 cards
+        when scraped alone and 4 inside a full run, because under load the first
+        card existed long before the rest. It produced a silent partial
+        collapse — failure mode 1 in docs/ARCHITECTURE.md — with no error.
+
+        Returns the settled count (0 if nothing ever appeared).
+        """
+        import time
+
+        deadline = time.monotonic() + timeout / 1000
+        previous, stable_since = -1, None
+        while time.monotonic() < deadline:
+            count = len(self.page.query_selector_all(selector))
+            if count != previous:
+                previous, stable_since = count, time.monotonic()
+            elif count >= min_count and (time.monotonic() - stable_since) * 1000 >= settle_ms:
+                return count
+            self.page.wait_for_timeout(150)
+
+        if previous < min_count:
+            logger.warning(f"{self.source_name}: only {max(previous, 0)} '{selector}' "
+                           f"after {timeout}ms (wanted at least {min_count})")
+        return max(previous, 0)
+
+    def query_selector(self, selector: str):
+        """Find first element matching selector"""
+        return self.page.query_selector(selector)
+
+    def query_selector_all(self, selector: str):
+        """Find all elements matching selector"""
+        return self.page.query_selector_all(selector)
+
+    def get_text(self, selector: str) -> Optional[str]:
+        """Get text content of element, returns None if not found"""
+        elem = self.page.query_selector(selector)
+        if elem:
+            return self.clean_text(elem.text_content())
+        return None
+
+    def get_attribute(self, selector: str, attribute: str) -> Optional[str]:
+        """Get attribute value of element, returns None if not found"""
+        elem = self.page.query_selector(selector)
+        if elem:
+            return elem.get_attribute(attribute)
+        return None
+
+    def get_html(self) -> str:
+        """Get current page HTML content"""
+        return self.page.content()
+
+    def get_soup(self) -> BeautifulSoup:
+        """Get BeautifulSoup object of current page"""
+        return BeautifulSoup(self.page.content(), 'html.parser')
+
+    def scroll_to_bottom(self, delay: int = 500):
+        """Scroll to bottom of page to trigger lazy loading"""
+        self.page.evaluate("""
+            async () => {
+                await new Promise((resolve) => {
+                    let totalHeight = 0;
+                    const distance = 300;
+                    const timer = setInterval(() => {
+                        window.scrollBy(0, distance);
+                        totalHeight += distance;
+                        if (totalHeight >= document.body.scrollHeight) {
+                            clearInterval(timer);
+                            resolve();
+                        }
+                    }, 100);
+                });
+            }
+        """)
+        self.page.wait_for_timeout(delay)
+
+    def click(self, selector: str, timeout: int = 5000):
+        """Click element with auto-waiting"""
+        self.page.click(selector, timeout=timeout)
+
+    def fill(self, selector: str, value: str):
+        """Fill input field"""
+        self.page.fill(selector, value)
+
+    def screenshot(self, path: str):
+        """Take screenshot for debugging"""
+        self.page.screenshot(path=path)
+
+    def clean_text(self, text: str) -> str:
+        """Clean and normalize text"""
+        if not text:
+            return ""
+        return ' '.join(text.strip().split())
+
+    def extract_image_url(self, soup: BeautifulSoup, base_url: str = None) -> Optional[str]:
+        """
+        Extract the best image URL from a page.
+        Tries multiple strategies: og:image meta tag, main image tags, etc.
+        """
+        # Strategy 1: Open Graph image (most reliable for event pages)
+        og_image = soup.find('meta', property='og:image')
+        if og_image and og_image.get('content'):
+            img_url = og_image['content']
+            return self._normalize_image_url(img_url, base_url)
+
+        # Strategy 2: Twitter card image
+        twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
+        if twitter_image and twitter_image.get('content'):
+            img_url = twitter_image['content']
+            return self._normalize_image_url(img_url, base_url)
+
+        # Strategy 3: Main content image (look for large images)
+        main_content = soup.find('main') or soup.find('article') or soup.find('div', class_=re.compile(r'content|event|detail', re.I))
+        if main_content:
+            img = main_content.find('img', src=True)
+            if img:
+                img_url = img.get('src') or img.get('data-src')
+                if img_url and self._is_valid_event_image(img_url):
+                    return self._normalize_image_url(img_url, base_url)
+
+        # Strategy 4: First large image on page
+        for img in soup.find_all('img', src=True)[:10]:
+            img_url = img.get('src') or img.get('data-src')
+            if img_url and self._is_valid_event_image(img_url):
+                return self._normalize_image_url(img_url, base_url)
+
+        return None
+
+    def _normalize_image_url(self, url: str, base_url: str = None) -> str:
+        """Normalize image URL to absolute URL"""
+        if not url:
+            return None
+
+        # Already absolute URL
+        if url.startswith('http://') or url.startswith('https://'):
+            return url
+
+        # Protocol-relative URL
+        if url.startswith('//'):
+            return f'https:{url}'
+
+        # Relative URL - need base
+        if base_url:
+            return urljoin(base_url, url)
+
+        return None
+
+    def _is_valid_event_image(self, url: str) -> bool:
+        """Check if URL appears to be a valid event image (not icon/logo/etc)"""
+        if not url:
+            return False
+
+        url_lower = url.lower()
+
+        # Skip common non-event images
+        skip_patterns = [
+            'logo', 'icon', 'favicon', 'sprite', 'placeholder',
+            'avatar', 'profile', 'banner', 'header', 'footer',
+            'loading', 'spinner', 'pixel', '1x1', 'spacer',
+            'button', 'arrow', 'social', 'facebook', 'twitter',
+            'instagram', 'youtube', 'linkedin', 'pinterest'
+        ]
+
+        for pattern in skip_patterns:
+            if pattern in url_lower:
+                return False
+
+        # Check for common image extensions
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+        has_valid_ext = any(ext in url_lower for ext in valid_extensions)
+
+        # Also accept URLs that might be dynamic image services
+        is_dynamic = any(service in url_lower for service in ['unsplash', 'cloudinary', 'imgix', 'cdn'])
+
+        return has_valid_ext or is_dynamic or '?' in url
+
+    @abstractmethod
+    def scrape_events(self) -> List[EventCreate]:
+        """Scrape events from source - must be implemented by subclasses"""
+        pass
+
+    def run(self) -> List[EventCreate]:
+        """Execute the scraper and return events.
+
+        Raises when the scrape found nothing *and* a navigation was refused
+        (HTTP status 400 or above). Zero events from a page that loaded is a
+        venue with nothing listed; zero events from a 403 is a block, and the
+        orchestrator must record it as `failed` — which also keeps the source's
+        existing upcoming events instead of letting the gate see an empty source.
+        """
+        try:
+            logger.info(f"Starting Playwright scrape of {self.source_name}")
+            self.navigations = []
+            self.setup_browser()
+            events = self.scrape_events()
+            refused = self.refused_navigations()
+            if not events and refused:
+                url, final, status = refused[0]
+                where = url if final == url else f"{url} (redirected to {final})"
+                more = f" and {len(refused) - 1} more" if len(refused) > 1 else ""
+                raise ScrapeRefusedError(
+                    f"{self.source_name}: 0 events after HTTP {status} from {where}{more}")
+            if refused:
+                logger.warning(f"{self.source_name}: {len(refused)} navigation(s) refused "
+                               f"but {len(events)} events found; keeping them")
+            logger.info(f"Successfully scraped {len(events)} events from {self.source_name}")
+            return events
+        except Exception as e:
+            logger.error(f"Failed to scrape {self.source_name}: {str(e)}")
+            raise
+        finally:
+            self.cleanup_browser()

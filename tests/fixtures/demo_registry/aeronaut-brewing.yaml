@@ -1,0 +1,7 @@
+name: Aeronaut Brewing
+adapter: custom
+module: tests.demo
+class: NotRunnable
+kind: playwright
+runs_in_ci: false
+notes: 'Cambridge Calendar source, for the engine tests: name and kind only'

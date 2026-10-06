@@ -1,0 +1,7 @@
+name: Arts at the Armory
+adapter: custom
+module: tests.demo
+class: NotRunnable
+kind: requests
+runs_in_ci: true
+notes: 'Cambridge Calendar source, for the engine tests: name and kind only'
