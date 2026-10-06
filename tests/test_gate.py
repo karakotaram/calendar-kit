@@ -239,3 +239,14 @@ def test_drift_ignores_retired_sources(tmp_path):
     assert "Harvard Memorial Church" not in reported, "retired source should be silent"
     assert live in reported, "a registered source that vanished must still be reported"
     assert "Harvard Memorial Church" not in BY_NAME
+
+
+@pytest.mark.parametrize("value", ["", "  ", "enfroce", "off"])
+def test_a_blank_or_unknown_gate_mode_still_enforces(value, monkeypatch, published):
+    """`GATE_MODE=` (set but empty) resolved to "", matched no mode, and never
+    blocked anything - not even a run that would delete the calendar."""
+    monkeypatch.setenv("GATE_MODE", value)
+    assert gate.resolve_mode() == "enforce"
+    survivors = [e for e in published if e["source_name"] == "User Submitted"]
+    d = gate.evaluate(survivors, previous=published)
+    assert d.blocking

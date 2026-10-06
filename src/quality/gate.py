@@ -27,6 +27,7 @@ Three deliberate safety valves:
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +38,9 @@ from src.quality.invariants import Violation, check_invariants
 
 # GATE_MODE=report evaluates without blocking; enforce is the default.
 MODE_ENV = "GATE_MODE"
+MODES = ("enforce", "report", "force")
+
+logger = logging.getLogger(__name__)
 
 # Catastrophic collapse is checked against the data being replaced, not against
 # a learned baseline, so it needs no history and is never subject to GATE_DRIFT.
@@ -127,9 +131,20 @@ class GateDecision:
 
 
 def resolve_mode(*, force: bool = False, mode: Optional[str] = None) -> str:
+    """The gate's mode. Anything but an exact, known value means enforce.
+
+    `GATE_MODE=` (set but empty, which is how a CI variable that was never
+    filled in renders) used to resolve to "", which matched no mode and so
+    never blocked - not even a run deleting the calendar. A typo must never be
+    what switches the gate off.
+    """
     if force:
         return "force"
-    return (mode or os.environ.get(MODE_ENV, "enforce")).lower()
+    value = (mode or os.environ.get(MODE_ENV) or "enforce").strip().lower()
+    if value not in MODES:
+        logger.warning(f"{MODE_ENV}={value!r} is not one of {MODES}; enforcing")
+        return "enforce"
+    return value
 
 
 def drift_enforced(drift_mode: Optional[str] = None) -> bool:
