@@ -115,7 +115,10 @@ class EventValidator:
             event.state = config.STATE or None
 
         # Auto-detect family-friendly events
-        event.family_friendly = EventValidator.is_family_friendly(event)
+        # A source that says "family friendly" (a reader's submission, a
+        # library's children's category) is believed; the keyword guess only
+        # adds, never overrules. It says no to anything at 7 PM or later.
+        event.family_friendly = event.family_friendly or EventValidator.is_family_friendly(event)
 
         # Auto-categorize as food and drink if no category or if venue is food/drink related
         if EventValidator.is_food_and_drink_event(event):

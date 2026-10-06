@@ -27,3 +27,15 @@ def test_scrape_timestamps_are_rejected():
     is_valid, error = EventValidator.validate_event(make_event(stamped))
     assert not is_valid
     assert "scrape timestamp" in error
+
+
+def test_a_source_saying_family_friendly_is_believed():
+    """The keyword guess says no to anything at 7 PM or later, and used to
+    overwrite a submitter's explicit yes."""
+    from src.models.event import EventCreate
+    from src.utils.validator import EventValidator
+
+    event = EventCreate(title="Halloween Lantern Walk", description="Bring lanterns.",
+                        start_datetime=datetime(2026, 10, 31, 19, 30), family_friendly=True,
+                        source_url="https://example.org/walk", source_name="User Submitted")
+    assert EventValidator.clean_and_enhance(event).family_friendly is True
