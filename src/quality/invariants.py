@@ -142,7 +142,7 @@ def check_invariants(events: Iterable[dict], *, now: Optional[datetime] = None) 
                 aware[e.get("source_name")].append(v.isoformat())
     for source, bad in aware.items():
         add("tz_aware", "error",
-            f"{len(bad)} tz-aware datetimes — everything is stored naive Eastern",
+            f"{len(bad)} tz-aware datetimes — everything is stored as naive local time",
             source, len(bad), bad[0])
 
     # --- timestamp pileups ---------------------------------------------------

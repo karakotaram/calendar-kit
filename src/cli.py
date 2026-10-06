@@ -29,10 +29,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from src import config
 from src.sources import BY_NAME, SOURCES
 
 REPO = Path(__file__).resolve().parents[1]
-LIVE_API = "https://web-production-00281.up.railway.app"
+# The deployed API, from calendar.config.yaml. Empty until you deploy.
+LIVE_API = (config.RAW["api"].get("base_url") or "").rstrip("/")
 
 OK, WARN, BAD, DOT = "✓", "!", "✗", "·"
 
@@ -56,7 +58,10 @@ def _git(*args: str) -> str:
 
 def _fetch_live(path: str, timeout: int = 25):
     import urllib.request
-    with urllib.request.urlopen(f"{LIVE_API}{path}", timeout=timeout) as r:
+    if not LIVE_API:
+        raise RuntimeError("api.base_url is empty in calendar.config.yaml - deploy first, then set it")
+    request = urllib.request.Request(f"{LIVE_API}{path}", headers={"User-Agent": config.USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 
@@ -112,7 +117,9 @@ def cmd_doctor(args) -> int:
 
     # -- sources present in the registry but absent from the data -----------
     present = {e.get("source_name") for e in events}
-    missing = sorted({s.name for s in SOURCES} - present)
+    # Reader submissions may legitimately be empty; blocked and retired
+    # sources are not run. Only an active scraped source going quiet is news.
+    missing = sorted({s.name for s in SOURCES if s.is_scraped} - present)
     if missing:
         note(WARN, f"{len(missing)} registered source(s) contribute no events: {', '.join(missing)}")
 
@@ -211,7 +218,7 @@ def cmd_sources(args) -> int:
               f"{n:>7}{furthest:>15}  {seen or '-'}")
 
     active = [s for s in SOURCES if s.status == "active"]
-    silent = [s.name for s in active if not counts.get(s.name)]
+    silent = [s.name for s in active if s.kind != "manual" and not counts.get(s.name)]
     print(f"\n{len(active)} active sources, {len(active) - len(silent)} contributing events")
     if silent:
         print(f"{BAD} contributing nothing: {', '.join(silent)}")
@@ -363,13 +370,15 @@ def cmd_add(args) -> int:
         params[key] = yaml.safe_load(value) if value else True
     if params:
         entry["params"] = params
-    venue = {k: v for k, v in (("name", args.venue_name), ("street", args.street),
-                                ("city", args.city), ("zip", args.zip)) if v}
+    given = (("name", args.venue_name), ("street", args.street), ("city", args.city), ("zip", args.zip))
+    venue = {k: v for k, v in given if v}
     if venue:
         entry["venue"] = venue
     if args.adapter == "custom":
         entry["module"] = args.module or f"src.scrapers.custom.{slug.replace('-', '_')}"
         entry["class"] = args.cls or "Scraper"
+    if args.kind:
+        entry["kind"] = args.kind
     entry["runs_in_ci"] = not args.no_ci
     entry["status"] = args.status
     if args.notes:
@@ -675,6 +684,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--zip")
     a.add_argument("--module", help="custom scrapers: dotted module path")
     a.add_argument("--class", dest="cls", help="custom scrapers: class name")
+    a.add_argument("--kind", choices=["requests", "playwright", "aggregator"],
+                   help="override the adapter's kind; `aggregator` for listings sites that copy other venues")
     a.add_argument("--no-ci", action="store_true", help="the venue blocks GitHub's IP ranges")
     a.add_argument("--status", default="active", choices=["active", "blocked", "retired"])
     a.add_argument("--notes")
