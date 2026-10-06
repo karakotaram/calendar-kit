@@ -1,0 +1,134 @@
+name: Daily scrape
+
+# The daily refresh. scrape.py runs the gate (src/quality/gate.py) and exits
+# non-zero if the result fails the contract. data/events.json is then left
+# untouched, the bad run is quarantined for diagnosis, nothing is pushed, and
+# an issue is opened. Readers keeping yesterday's data is a much smaller harm
+# than readers getting today's wrong data.
+#
+# Repository settings this reads (Settings -> Secrets and variables -> Actions):
+#   secrets.ANTHROPIC_API_KEY       optional: Claude categorizes uncategorized events
+#                                   and suggests causes when a source goes to zero
+#   secrets.VERCEL_DEPLOY_HOOK_URL  optional: rebuild the frontend after new data
+#   vars.GEOCODER                   optional: "nominatim" to look up unknown venues
+#                                   on OpenStreetMap (cached in data/geocode-cache.json)
+
+on:
+  schedule:
+    # Cron is UTC. 10:00 UTC is 3 AM Pacific in summer, 2 AM in winter: pick
+    # an hour in the small hours of your region's time zone.
+    - cron: '0 10 * * *'
+
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Publish even if the gate fails (use when a large change is known-good)'
+        type: boolean
+        default: false
+      drift_mode:
+        description: 'Whether source-relative drift may block publishing'
+        type: choice
+        options: [report, enforce]
+        default: report
+
+# One writer to data/ at a time: this and the submissions sync both push.
+concurrency:
+  group: data-writes
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright's browser
+        # Sources registered `kind: playwright` drive a real browser. Without
+        # this they fail in CI while working locally, which is exactly the kind
+        # of silent partial coverage the run record exists to expose.
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run scraper
+        run: |
+          mkdir -p logs data/runs data/agent_reports
+          python scrape.py ${{ inputs.force && '--force' || '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEOCODER: ${{ vars.GEOCODER }}
+          # Invariants always block. Drift reports until explicitly enforced -
+          # see the DRIFT_ENV comment in src/quality/gate.py.
+          GATE_DRIFT: ${{ inputs.drift_mode || 'report' }}
+
+      # Everything below runs only when the gate passed: a blocked scrape.py
+      # exits non-zero and stops the job here.
+
+      - name: Commit and push
+        id: push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No changes to data/, nothing to commit"
+            exit 0
+          fi
+          git commit -q -m "Auto-update events - $(date -u +'%Y-%m-%d %H:%M UTC')"
+          for attempt in 1 2 3; do
+            if git push -q; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; rebasing and retrying"
+            git pull -q --rebase origin "$GITHUB_REF_NAME"
+            sleep $((attempt * 10))
+          done
+          echo "Push failed after 3 attempts" >&2
+          exit 1
+
+      # A frontend that prerenders pages at build time only sees new events
+      # when it rebuilds. Set VERCEL_DEPLOY_HOOK_URL to a deploy hook from the
+      # frontend project (Vercel -> Settings -> Git -> Deploy Hooks). Absent,
+      # this says so rather than failing the scrape.
+      - name: Rebuild the frontend
+        if: steps.push.outputs.changed == 'true'
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK_URL is not set - prerendered pages will not pick up today's events"
+            exit 0
+          fi
+          code=$(curl -s -o /tmp/hook.out -w '%{http_code}' -X POST "$HOOK")
+          echo "deploy hook responded $code"
+          [ "$code" -lt 400 ] || { cat /tmp/hook.out; exit 1; }
+
+      # Runs even when the gate blocked, so the evidence survives the job.
+      - name: Preserve run record and quarantine
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-run-${{ github.run_id }}
+          path: |
+            data/runs/
+            data/quarantine/
+            logs/scraper.log
+          retention-days: 30
+          if-no-files-found: ignore

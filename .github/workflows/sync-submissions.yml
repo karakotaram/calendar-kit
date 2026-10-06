@@ -1,0 +1,85 @@
+name: Sync reader submissions
+
+# Publishes new rows from the "Submit an event" Google Form's response sheet
+# (sync_user_events.py; columns and setup in src/scrapers/google_sheets.py).
+# Does nothing until calendar.config.yaml has `features.submissions: true` and
+# a `submissions.sheet_id`.
+#
+# Repository settings this reads:
+#   secrets.GOOGLE_SERVICE_ACCOUNT_JSON  a service account key with edit access to the sheet
+#   vars.SUBMISSIONS_REQUIRE_APPROVAL    "1" to publish only rows marked approved in column M
+#   vars.GEOCODER                        "nominatim" to look up unknown venues
+
+on:
+  schedule:
+    # Daily, two hours after the scrape (cron is UTC)
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+# One writer to data/ at a time: this and the daily scrape both push.
+concurrency:
+  group: data-writes
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Are submissions configured?
+        id: config
+        run: |
+          python -c "from src import config; print('enabled=' + str(config.FEATURES['submissions'] and bool(config.SUBMISSIONS_SHEET_ID)).lower())" >> "$GITHUB_OUTPUT"
+
+      - name: Sync submissions
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SUBMISSIONS_REQUIRE_APPROVAL: ${{ vars.SUBMISSIONS_REQUIRE_APPROVAL }}
+          GEOCODER: ${{ vars.GEOCODER }}
+        run: |
+          mkdir -p logs data
+          python sync_user_events.py
+
+      - name: Commit and push
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No new submissions to publish"
+            exit 0
+          fi
+          git commit -q -m "Sync reader submissions - $(date -u +'%Y-%m-%d %H:%M UTC')"
+          for attempt in 1 2 3; do
+            if git push -q; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; rebasing and retrying"
+            git pull -q --rebase origin "$GITHUB_REF_NAME"
+            sleep $((attempt * 10))
+          done
+          echo "Push failed after 3 attempts" >&2
+          exit 1
+
+      - name: Not configured
+        if: steps.config.outputs.enabled != 'true'
+        run: echo "Submissions are not configured in calendar.config.yaml; nothing to do"

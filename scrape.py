@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List
 
 from src import config
-from src.sources import SOURCES, in_run_order, skipped_in_ci, preserved_always
+from src.sources import USER_SUBMITTED, in_run_order, skipped_in_ci, preserved_always
 from src.models.event import EventCreate, Event
 from src.utils.validator import EventValidator
 from src.utils.deduplicator import EventDeduplicator
@@ -186,10 +186,10 @@ class ScraperOrchestrator:
           - sources CI cannot reach, which are refreshed by scrape_local.py
           - sources whose scraper failed or returned nothing this run
 
-        That last one is the important one. Harvard Book Store started
-        403-ing from every IP, and because it only had "preserve" status inside
-        CI, a local run deleted all 21 of its events — along with Somerville
-        Theatre's. A failed scrape is not evidence that a venue cancelled its
+        That last one is the important one. On Cambridge Calendar, Harvard Book
+        Store started 403-ing from every IP, and because it only had "preserve"
+        status inside CI, a local run deleted all 21 of its events — along with
+        another venue's. A failed scrape is not evidence that a venue cancelled its
         programme, so it must not be allowed to delete anything.
         """
         # Preserve CI-blocked sources plus anything the registry says the
@@ -205,7 +205,7 @@ class ScraperOrchestrator:
         # For a source that produced nothing, keep only its still-upcoming
         # events: preserved entries bypass validation, so without this they
         # would linger in the past forever.
-        today = datetime.now().date().isoformat()
+        today = datetime.now(config.TZ).date().isoformat()
         rescued = [
             e for e in stored
             if e.get('source_name') in recovered
@@ -222,7 +222,7 @@ class ScraperOrchestrator:
 
         if preserved_events:
             user_submitted = len([e for e in preserved_events
-                                  if e.get('source_name') == 'User Submitted'])
+                                  if e.get('source_name') == USER_SUBMITTED.name])
             logger.info(f"Preserving {len(preserved_events)} events "
                         f"({user_submitted} user-submitted, "
                         f"{len(preserved_events) - user_submitted} from skipped or failed sources)")
@@ -249,17 +249,20 @@ class ScraperOrchestrator:
         logger.info(f"Saved {len(publish_set)} events to data/events.json")
 
 
-def prune_orphaned_featured(featured_file: str = "data/featured.json",
+def prune_orphaned_featured(featured_file: str = None,
                             events_file: str = "data/events.json"):
     """Remove Editor's Picks entries that no longer point at a live upcoming event.
 
     An entry is kept only if some event in events.json matches its title +
-    source_name AND has a start_datetime on or after today (Eastern). This keeps
-    featured.json from accumulating orphaned/past entries as events roll off.
+    source_name AND has a start_datetime on or after today (local time). This
+    keeps featured.json from accumulating orphaned/past entries as events roll off.
+    The API prunes the same way whenever a pick changes, which covers picks kept
+    on a volume (FEATURED_PATH) that this run cannot reach.
 
     Safe by design: if events.json is missing/empty/unreadable it is a no-op, so a
     failed scrape can never wipe the featured list.
     """
+    featured_file = featured_file or os.environ.get("FEATURED_PATH") or "data/featured.json"
     if not os.path.exists(featured_file) or not os.path.exists(events_file):
         return
     try:
@@ -273,8 +276,7 @@ def prune_orphaned_featured(featured_file: str = "data/featured.json",
     if not featured or not events:
         return
 
-    from src.models.event import LOCAL_TZ
-    today = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d")
+    today = datetime.now(config.TZ).strftime("%Y-%m-%d")
 
     def has_upcoming_match(entry: dict) -> bool:
         title = entry.get("title")
@@ -364,19 +366,10 @@ def main():
     except Exception as e:
         logger.warning(f"CI monitor agent failed (non-fatal): {e}")
 
-    # Generate HTML view
-    try:
-        from generate_html import generate_events_html
-        generate_events_html()
-        logger.info("Generated HTML view at data/events.html")
-    except Exception as e:
-        logger.error(f"Failed to generate HTML: {str(e)}")
-
     # Print summary
     print(f"\n✓ Successfully scraped {len(events)} events")
-    print(f"✓ Data saved to data/events.json")
-    print(f"✓ HTML view generated at data/events.html")
-    print(f"✓ Logs saved to logs/scraper.log")
+    print("✓ Data saved to data/events.json")
+    print("✓ Logs saved to logs/scraper.log")
     print(f"✓ Run record at data/runs/{run.run_id}.json")
     return 0
 

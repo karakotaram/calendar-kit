@@ -1,0 +1,35 @@
+name: Tests
+
+# Offline and deterministic: scrapers parse saved pages in tests/fixtures/,
+# and a test that reaches the network fails. Runs in seconds and does not
+# break when a venue's site is down.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -q
+
+      # E9 syntax errors, F63/F7 broken constructs, F82 undefined names: the
+      # checks that catch code which cannot run.
+      - name: Lint
+        run: flake8 src/ tests/ scrape.py scrape_local.py sync_user_events.py --select=E9,F63,F7,F82 --max-line-length=200

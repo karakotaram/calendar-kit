@@ -12,9 +12,10 @@ PyYAML>=6.0
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 # Optional features (calendar.config.yaml `features`)
-anthropic>=0.40.0           # chat: the assistant over upcoming events
+anthropic>=1.5.0,<2         # chat, and the optional Claude steps in src/agents
 google-auth>=2.23.0         # submissions: reading the Google Form's response sheet
 google-api-python-client>=2.100.0
-# Development
+# Development (left out of the API's Docker image)
 pytest>=8.0.0
 flake8>=7.0.0
+httpx>=0.25,<0.28           # FastAPI's TestClient in tests/test_api_*.py

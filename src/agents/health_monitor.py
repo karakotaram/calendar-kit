@@ -1,4 +1,4 @@
-"""Agent 2: Health Monitor - Detect broken scrapers using rolling history"""
+"""Health Monitor: detect broken scrapers from each source's event count over recent runs"""
 import json
 import logging
 import os
@@ -94,10 +94,12 @@ class HealthMonitorAgent(BaseAgent):
                 # New source, no history - skip
                 continue
 
-            if source not in BY_NAME:
-                # Retired from the registry on purpose. Its history lingers for
-                # MAX_HISTORY runs and would otherwise read as a broken scraper
-                # - and open a GitHub issue - on every run until it ages out.
+            registered = BY_NAME.get(source)
+            if registered is None or registered.status != "active":
+                # Retired (or marked blocked) on purpose. Its history lingers
+                # for MAX_HISTORY runs and would otherwise read as a broken
+                # scraper - and open a GitHub issue - on every run until it
+                # ages out.
                 continue
 
             avg = sum(past_counts) / len(past_counts)
@@ -134,10 +136,10 @@ class HealthMonitorAgent(BaseAgent):
         severity_order = {"CRITICAL": 0, "WARNING": 1, "MISSING": 2}
         alerts.sort(key=lambda a: severity_order.get(a["severity"], 3))
 
-        # Optional: get Groq diagnosis for critical alerts
+        # Optional: a short diagnosis from Claude for critical alerts
         diagnosis = None
         critical_alerts = [a for a in alerts if a["severity"] == "CRITICAL"]
-        if critical_alerts and self.groq_client:
+        if critical_alerts and self.anthropic_client:
             diagnosis = self._diagnose_failures(critical_alerts)
 
         report = {
@@ -164,7 +166,7 @@ class HealthMonitorAgent(BaseAgent):
         return report
 
     def _diagnose_failures(self, critical_alerts: list) -> str:
-        """Use Groq to diagnose why scrapers might be failing"""
+        """Ask Claude for likely reasons these scrapers came back empty"""
         sources = ", ".join(a["source"] for a in critical_alerts)
         prompt = (
             f"These web scrapers for {config.REGION_NAME} event venues returned 0 events "

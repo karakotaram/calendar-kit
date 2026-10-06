@@ -1,0 +1,22 @@
+# Venues pinned by hand: where they are, for events that don't say.
+#
+# Read by src/utils/geocoder.py before anything else, and always wins over
+# OpenStreetMap. Add a venue when its events land on the map in the wrong
+# place, have no pin, or get the wrong city.
+#
+# The key is the venue's name as events spell it (case does not matter).
+# `aliases` are other spellings; a scraped name containing a name or alias of
+# five or more letters as whole words also matches ("The Fillmore SF" finds
+# "The Fillmore"). lat and lng go together; city alone is allowed.
+#
+# The Fillmore:
+#   lat: 37.78404
+#   lng: -122.43293
+#   city: San Francisco
+#   aliases: [Fillmore Auditorium]
+#
+# Oakland Museum of California:
+#   lat: 37.79864
+#   lng: -122.26453
+#   city: Oakland
+#   aliases: [OMCA]

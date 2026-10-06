@@ -1,11 +1,10 @@
-"""Agent 3: Enrichment - Improve event data quality (categories, dedup, family-friendly)"""
+"""Enrichment: improve event data (categories, cross-source dedup, family-friendly)"""
 import json
 import logging
 import os
 from collections import defaultdict
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import List
 
 from src.agents.base_agent import BaseAgent
 
@@ -14,6 +13,9 @@ logger = logging.getLogger(__name__)
 # Venues whose events are family-friendly by default. Region-specific: add
 # your own (exact venue names as they appear on events).
 FAMILY_VENUES: set = set()
+
+# Events per Claude call
+BATCH_SIZE = 25
 
 VALID_CATEGORIES = {
     "music", "arts and culture", "food and drink", "theater",
@@ -69,7 +71,7 @@ class EnrichmentAgent(BaseAgent):
         }
 
     def improve_categories(self, events: list) -> int:
-        """Batch events with no/other category to Groq for classification"""
+        """Ask Claude to categorize events with no category (or "other"), in batches"""
         uncategorized = [
             (i, e) for i, e in enumerate(events)
             if not e.get("category") or e.get("category") == "other"
@@ -78,14 +80,13 @@ class EnrichmentAgent(BaseAgent):
         if not uncategorized:
             return 0
 
-        if not self.groq_client:
-            self.logger.info("Groq not available, skipping category improvement")
+        if not self.anthropic_client:
+            self.logger.info("Claude not available (ANTHROPIC_API_KEY unset), skipping category improvement")
             return 0
 
         improved = 0
-        # Process in batches of 10
-        for batch_start in range(0, len(uncategorized), 10):
-            batch = uncategorized[batch_start:batch_start + 10]
+        for batch_start in range(0, len(uncategorized), BATCH_SIZE):
+            batch = uncategorized[batch_start:batch_start + BATCH_SIZE]
             event_lines = []
             for idx, (_, event) in enumerate(batch):
                 title = event.get("title", "")
@@ -133,13 +134,13 @@ class EnrichmentAgent(BaseAgent):
         if not candidates:
             return 0
 
-        if not self.groq_client:
-            self.logger.info("Groq not available, skipping family-friendly improvement")
+        if not self.anthropic_client:
+            self.logger.info("Claude not available (ANTHROPIC_API_KEY unset), skipping family-friendly improvement")
             return 0
 
         improved = 0
-        for batch_start in range(0, len(candidates), 10):
-            batch = candidates[batch_start:batch_start + 10]
+        for batch_start in range(0, len(candidates), BATCH_SIZE):
+            batch = candidates[batch_start:batch_start + BATCH_SIZE]
             event_lines = []
             for idx, (_, event) in enumerate(batch):
                 title = event.get("title", "")
@@ -263,7 +264,7 @@ if __name__ == "__main__":
     )
     agent = EnrichmentAgent()
     result = agent.run()
-    print(f"\nEnrichment results:")
+    print("\nEnrichment results:")
     print(f"  Categories improved: {result.get('categories_improved', 0)}")
     print(f"  Family-friendly improved: {result.get('family_friendly_improved', 0)}")
     print(f"  Fuzzy dedup removed: {result.get('fuzzy_dedup_removed', 0)}")

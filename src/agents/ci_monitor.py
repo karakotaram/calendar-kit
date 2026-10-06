@@ -1,7 +1,7 @@
-"""Agent 1: CI Monitor - Track source freshness and detect stale/missing sources"""
+"""CI Monitor: track each source's freshness and flag stale or missing ones"""
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil import parser as dateparse
 
 from src.agents.base_agent import BaseAgent
@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 # Derived from the one source registry — see src/sources.py. This used to be a
 # hand-maintained copy and had drifted four scrapers out of sync with what
 # scrape.py actually runs, leaving them completely unmonitored.
-REGISTERED_SOURCES = {s.name: {"ci": s.runs_in_ci} for s in SOURCES}
+REGISTERED_SOURCES = {s.name: {"ci": s.runs_in_ci, "watched": s.is_scraped} for s in SOURCES}
+# Every registered name is a key, so nothing can go unmonitored by omission.
+# Freshness is only judged for sources the pipeline actually scrapes: a
+# retired or blocked source is expected to go quiet, and reader submissions
+# are not scraped at all.
 
 # Staleness thresholds
 CI_STALE_DAYS = 3
@@ -22,8 +26,11 @@ LOCAL_STALE_DAYS = 14
 class CIMonitorAgent(BaseAgent):
     """Monitor source freshness and detect stale/missing sources"""
 
-    def __init__(self):
+    def __init__(self, publish: bool = True):
+        """publish=False computes the report without saving it or opening an
+        issue - what the API's /health/scrapers wants."""
         super().__init__("ci_monitor")
+        self.publish = publish
 
     def execute(self) -> dict:
         events = self.load_events()
@@ -53,6 +60,8 @@ class CIMonitorAgent(BaseAgent):
         healthy_sources = []
 
         for source_name, config in REGISTERED_SOURCES.items():
+            if not config.get("watched", True):
+                continue
             stats = source_stats.get(source_name)
 
             if not stats or stats["count"] == 0:
@@ -117,11 +126,10 @@ class CIMonitorAgent(BaseAgent):
             },
         }
 
-        self.save_report(report, "ci_monitor_report.json")
-
-        # Create GitHub issue if there are problems
-        if stale_sources or missing_sources:
-            self._create_issue(stale_sources, missing_sources)
+        if self.publish:
+            self.save_report(report, "ci_monitor_report.json")
+            if stale_sources or missing_sources:
+                self._create_issue(stale_sources, missing_sources)
 
         return report
 

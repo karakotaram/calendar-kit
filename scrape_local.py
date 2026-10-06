@@ -119,7 +119,7 @@ def main():
         json.dump(sort_events(final_events), f, indent=2, default=str)
 
     logger.info("=" * 60)
-    logger.info(f"LOCAL SCRAPE COMPLETE")
+    logger.info("LOCAL SCRAPE COMPLETE")
     logger.info(f"  New events from local sources: {len(new_events)}")
     logger.info(f"  Total events in database: {len(final_events)}")
     logger.info("=" * 60)
@@ -130,7 +130,7 @@ def main():
         count = len([e for e in new_events if e.get('source_name') == source])
         print(f"    - {source}: {count} events")
     print(f"✓ Total events in database: {len(final_events)}")
-    print(f"✓ Data saved to data/events.json")
+    print("✓ Data saved to data/events.json")
 
 
 if __name__ == "__main__":

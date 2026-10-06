@@ -5,7 +5,6 @@ import os
 import subprocess
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Optional
 
 
@@ -18,81 +17,59 @@ class BaseAgent(ABC):
     def __init__(self, name: str):
         self.name = name
         self.logger = logging.getLogger(f"agent.{name}")
-        self._groq_client = None
         self._anthropic_client = None
 
     @property
-    def groq_client(self):
-        """Lazy-load Groq client, returns None if key missing"""
-        if self._groq_client is None:
-            api_key = os.environ.get("GROQ_API_KEY")
-            if api_key:
-                try:
-                    from groq import Groq
-                    self._groq_client = Groq(api_key=api_key)
-                except ImportError:
-                    self.logger.warning("groq package not installed")
-        return self._groq_client
-
-    @property
     def anthropic_client(self):
-        """Lazy-load Anthropic client, returns None if key missing"""
-        if self._anthropic_client is None:
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if api_key:
-                try:
-                    import anthropic
-                    self._anthropic_client = anthropic.Anthropic(api_key=api_key)
-                except ImportError:
-                    self.logger.warning("anthropic package not installed")
+        """Lazy-load the Anthropic client; None when ANTHROPIC_API_KEY is unset.
+
+        Every LLM step in the agents is optional. Without a key they log that
+        they were skipped and the run carries on, so treat "skipped" in a log
+        as a finding, not as success.
+        """
+        if self._anthropic_client is None and os.environ.get("ANTHROPIC_API_KEY"):
+            try:
+                import anthropic
+                self._anthropic_client = anthropic.Anthropic(timeout=120.0)
+            except ImportError:
+                self.logger.warning("anthropic package not installed")
         return self._anthropic_client
 
-    def llm_complete(self, prompt: str, system: str = "", provider: str = "groq") -> Optional[str]:
-        """Unified LLM interface. Returns None if provider unavailable."""
-        if provider == "groq":
-            client = self.groq_client
-            if not client:
-                self.logger.warning("Groq not available (missing GROQ_API_KEY or package)")
-                return None
-            try:
-                messages = []
-                if system:
-                    messages.append({"role": "system", "content": system})
-                messages.append({"role": "user", "content": prompt})
-                response = client.chat.completions.create(
-                    model="openai/gpt-oss-120b",
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=4096,
-                    reasoning_effort="low",
-                )
-                return response.choices[0].message.content
-            except Exception as e:
-                self.logger.error(f"Groq completion failed: {e}")
-                return None
-
-        elif provider == "anthropic":
-            client = self.anthropic_client
-            if not client:
-                self.logger.warning("Anthropic not available (missing ANTHROPIC_API_KEY or package)")
-                return None
-            try:
-                kwargs = {
-                    "model": "claude-sonnet-4-5-20250929",
-                    "max_tokens": 8192,
-                    "messages": [{"role": "user", "content": prompt}],
-                }
-                if system:
-                    kwargs["system"] = system
-                response = client.messages.create(**kwargs)
-                return response.content[0].text
-            except Exception as e:
-                self.logger.error(f"Anthropic completion failed: {e}")
-                return None
-
-        else:
-            self.logger.error(f"Unknown LLM provider: {provider}")
+    def llm_complete(self, prompt: str, system: str = "") -> Optional[str]:
+        """One Claude call. Returns the reply text, or None if unavailable,
+        declined, or failed - callers must work without it."""
+        client = self.anthropic_client
+        if not client:
+            self.logger.info("Claude not available (ANTHROPIC_API_KEY unset); skipping LLM step")
             return None
+        import anthropic
+
+        kwargs = {
+            "model": os.environ.get("AGENT_MODEL", "claude-opus-5-5"),
+            "max_tokens": 16000,
+            "betas": ["server-side-fallback-2026-07-01"],
+            "fallbacks": "default",
+            "output_config": {"effort": "low"},
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system:
+            kwargs["system"] = system
+        try:
+            response = client.beta.messages.create(**kwargs)
+        except anthropic.RateLimitError:
+            self.logger.warning("Claude rate limited; skipping LLM step")
+            return None
+        except anthropic.APIStatusError as e:
+            self.logger.error(f"Claude request failed ({e.status_code}): {e.message}")
+            return None
+        except anthropic.APIConnectionError as e:
+            self.logger.warning(f"Could not reach Claude: {e}")
+            return None
+        if response.stop_reason == "refusal":
+            self.logger.warning("Claude declined the request; skipping LLM step")
+            return None
+        text = "".join(b.text for b in response.content if b.type == "text").strip()
+        return text or None
 
     def load_events(self) -> list:
         """Load events from data/events.json"""

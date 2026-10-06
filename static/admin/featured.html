@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Editor's Picks | {{SITE_NAME}}</title>
+<style>
+    :root {
+        --text: #1f2328;
+        --muted: #59636e;
+        --bg: #f6f8fa;
+        --panel: #ffffff;
+        --border: #d1d9e0;
+        --accent: #0969da;
+        --pick: #9a6700;
+        --pick-bg: #fff8c5;
+        --danger: #cf222e;
+        --ok: #1a7f37;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --text: #e6edf3; --muted: #9198a1; --bg: #0d1117; --panel: #151b23;
+            --border: #3d444d; --accent: #4493f8; --pick: #d29922; --pick-bg: #2e2a1a;
+            --danger: #f85149; --ok: #3fb950;
+        }
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; background: var(--bg); color: var(--text);
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+    header { margin-bottom: 20px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    .muted { color: var(--muted); font-size: 14px; }
+    section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    input, select, button { font: inherit; color: inherit; }
+    input, select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    button { cursor: pointer; border: 1px solid var(--border); background: var(--bg); border-radius: 6px; padding: 6px 12px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { opacity: .5; cursor: default; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input[type=search], .row input[type=password] { flex: 1; min-width: 180px; }
+    .hidden { display: none !important; }
+    .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+    .pick { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--pick-bg); }
+    .pick div { flex: 1; min-width: 0; }
+    .pick strong, .ellipsis { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    th, td { padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    td.title { max-width: 360px; }
+    td.when { white-space: nowrap; }
+    .star { border: none; background: none; font-size: 20px; line-height: 1; padding: 0 4px; color: var(--muted); }
+    .star.on { color: var(--pick); }
+    .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+    #toast { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 6px; color: #fff; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    #toast.show { opacity: 1; }
+    #toast.ok { background: var(--ok); }
+    #toast.error { background: var(--danger); }
+    @media (max-width: 640px) { td.venue, th.venue { display: none; } td.title { max-width: 180px; } }
+</style>
+</head>
+<body>
+<main>
+    <header>
+        <h1>Editor's Picks</h1>
+        <div class="muted">{{SITE_NAME}} &middot; starred events are featured on the site. A pick covers every date of a recurring event.</div>
+    </header>
+
+    <section id="signin">
+        <h2>Sign in</h2>
+        <form id="signin-form" class="row">
+            <input type="password" id="token" placeholder="Admin token" autocomplete="current-password" required>
+            <button class="primary" type="submit">Continue</button>
+        </form>
+        <p class="muted" id="signin-msg">The token is the API's ADMIN_TOKEN. It is kept for this browser tab only.</p>
+    </section>
+
+    <div id="app" class="hidden">
+        <section>
+            <div class="row" style="justify-content: space-between">
+                <h2 style="margin: 0">Current picks</h2>
+                <button id="signout" type="button">Sign out</button>
+            </div>
+            <div id="picks" style="margin-top: 12px" class="muted">Loading&hellip;</div>
+        </section>
+
+        <section>
+            <h2>Upcoming events</h2>
+            <div class="row" style="margin-bottom: 10px">
+                <input type="search" id="search" placeholder="Search titles and venues">
+                <select id="category"><option value="">All categories</option></select>
+            </div>
+            <table>
+                <thead><tr><th></th><th>Title</th><th class="venue">Venue</th><th>Category</th><th>When</th></tr></thead>
+                <tbody id="rows"></tbody>
+            </table>
+            <div class="pager">
+                <span class="muted" id="page-info"></span>
+                <span class="row">
+                    <button id="prev" type="button">Previous</button>
+                    <button id="next" type="button">Next</button>
+                </span>
+            </div>
+        </section>
+    </div>
+</main>
+<div id="toast"></div>
+
+<script>
+const TOKEN_KEY = 'adminToken';
+const PAGE_SIZE = 50;
+let token = null;
+let events = [];
+let picks = new Set();      // "title|||source_name"
+let filtered = [];
+let page = 0;
+
+const $ = (id) => document.getElementById(id);
+const key = (title, source) => title + '|||' + (source || '');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
+function storage(op, value) {
+    try {
+        if (op === 'get') return sessionStorage.getItem(TOKEN_KEY);
+        if (op === 'set') sessionStorage.setItem(TOKEN_KEY, value);
+        if (op === 'clear') sessionStorage.removeItem(TOKEN_KEY);
+    } catch (e) { /* storage blocked: the token lives in memory only */ }
+    return null;
+}
+
+let toastTimer;
+function toast(message, kind) {
+    const el = $('toast');
+    el.textContent = message;
+    el.className = 'show ' + kind;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+async function api(path, options = {}) {
+    const headers = Object.assign({}, options.headers, token ? { Authorization: 'Bearer ' + token } : {});
+    const response = await fetch(path, Object.assign({}, options, { headers }));
+    if (response.status === 401) { signOut('That token was not accepted.'); throw new Error('not signed in'); }
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || ('HTTP ' + response.status));
+    }
+    return response.json();
+}
+
+async function signIn(candidate) {
+    token = candidate;
+    try {
+        await api('/admin/verify');
+    } catch (e) {
+        if (e.message !== 'not signed in') signOut(e.message);
+        return;
+    }
+    storage('set', token);
+    $('signin').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    await load();
+}
+
+function signOut(message) {
+    token = null;
+    storage('clear');
+    $('app').classList.add('hidden');
+    $('signin').classList.remove('hidden');
+    $('signin-msg').textContent = message || 'Signed out.';
+}
+
+async function load() {
+    try {
+        const [featured, upcoming] = await Promise.all([
+            api('/featured'),
+            api('/events/slim?limit=5000&ranked=false&upcoming_only=true'),
+        ]);
+        picks = new Set(featured.map((p) => key(p.title, p.source_name)));
+        events = upcoming;
+        const categories = [...new Set(events.map((e) => e.category).filter(Boolean))].sort();
+        $('category').innerHTML = '<option value="">All categories</option>' +
+            categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        renderPicks();
+        applyFilters();
+    } catch (e) {
+        if (e.message !== 'not signed in') toast('Could not load events: ' + e.message, 'error');
+    }
+}
+
+function when(e) {
+    const start = new Date(e.start_datetime);   // naive local time, shown as written
+    const day = start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    if (e.all_day) return day + ' (all day)';
+    return day + ', ' + start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function renderPicks() {
+    // One card per pick, at its next date
+    const seen = new Set();
+    const cards = [];
+    for (const e of events) {
+        const k = key(e.title, e.source_name);
+        if (!picks.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        cards.push(`<div class="pick">
+            <span class="star on">&#9733;</span>
+            <div><strong title="${esc(e.title)}">${esc(e.title)}</strong>
+                 <span class="muted ellipsis">${esc(e.venue_name || e.source_name)} &middot; next ${esc(when(e))}</span></div>
+            <button type="button" data-id="${esc(e.id)}" data-feature="false" title="Remove">Remove</button>
+        </div>`);
+    }
+    $('picks').innerHTML = cards.length ? `<div class="picks">${cards.join('')}</div>`
+        : '<span class="muted">No picks yet. Star an event below.</span>';
+}
+
+function applyFilters() {
+    const q = $('search').value.trim().toLowerCase();
+    const category = $('category').value;
+    filtered = events.filter((e) =>
+        (!q || (e.title || '').toLowerCase().includes(q) || (e.venue_name || '').toLowerCase().includes(q)) &&
+        (!category || e.category === category));
+    page = 0;
+    renderTable();
+}
+
+function renderTable() {
+    const start = page * PAGE_SIZE;
+    $('rows').innerHTML = filtered.slice(start, start + PAGE_SIZE).map((e) => {
+        const on = picks.has(key(e.title, e.source_name));
+        return `<tr>
+            <td><button type="button" class="star ${on ? 'on' : ''}" data-id="${esc(e.id)}" data-feature="${!on}"
+                        title="${on ? 'Remove from picks' : 'Make a pick'}">${on ? '&#9733;' : '&#9734;'}</button></td>
+            <td class="title"><span class="ellipsis" title="${esc(e.title)}">${esc(e.title)}</span></td>
+            <td class="venue"><span class="ellipsis">${esc(e.venue_name || e.source_name)}</span></td>
+            <td>${esc(e.category || '')}</td>
+            <td class="when">${esc(when(e))}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="5" class="muted">No upcoming events match.</td></tr>';
+    const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    $('page-info').textContent = `Page ${page + 1} of ${pages} (${filtered.length} events)`;
+    $('prev').disabled = page === 0;
+    $('next').disabled = start + PAGE_SIZE >= filtered.length;
+}
+
+async function toggle(id, feature) {
+    const e = events.find((x) => x.id === id);
+    if (!e) return;
+    try {
+        await api(`/events/${encodeURIComponent(id)}/feature`, { method: feature ? 'POST' : 'DELETE' });
+        const k = key(e.title, e.source_name);
+        if (feature) picks.add(k); else picks.delete(k);
+        toast((feature ? 'Picked: ' : 'Removed: ') + e.title, 'ok');
+        renderPicks();
+        renderTable();
+    } catch (err) {
+        if (err.message !== 'not signed in') toast('Could not save: ' + err.message, 'error');
+    }
+}
+
+document.addEventListener('click', (ev) => {
+    const button = ev.target.closest('button[data-id]');
+    if (button) toggle(button.dataset.id, button.dataset.feature === 'true');
+});
+$('signin-form').addEventListener('submit', (ev) => { ev.preventDefault(); signIn($('token').value.trim()); });
+$('signout').addEventListener('click', () => signOut());
+$('search').addEventListener('input', applyFilters);
+$('category').addEventListener('change', applyFilters);
+$('prev').addEventListener('click', () => { if (page > 0) { page--; renderTable(); } });
+$('next').addEventListener('click', () => { if ((page + 1) * PAGE_SIZE < filtered.length) { page++; renderTable(); } });
+
+const saved = storage('get');
+if (saved) signIn(saved);
+</script>
+</body>
+</html>
