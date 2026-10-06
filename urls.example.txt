@@ -1,0 +1,18 @@
+# Venue and calendar URLs for /onboard, one per line.
+#
+#   cp urls.example.txt urls.txt      then replace these with your own
+#
+# - A line starting with # is a comment, and so is anything after " #".
+# - After " | ", an optional hint: anything you know that the page does not say.
+# - Give the page that lists the events when you know it, not the home page.
+# - Blank lines are ignored; a URL listed twice is onboarded once.
+#
+# The examples below use reserved example domains, so nothing is fetched if
+# this file is run by mistake.
+
+https://www.example.org/calendar/
+https://www.example.com/events | a city library: one calendar for all eleven branches
+https://shows.example.net/ | a listings site for the whole region, not a venue
+https://www.example.org/whats-on/ | has an iCal feed at /whats-on.ics
+https://music.university.example/concerts | public concerts only; the department lists internal talks too
+https://www.example.com/jazz # added after the 2026 season announcement

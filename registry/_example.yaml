@@ -1,0 +1,56 @@
+# An example source. Files whose names start with "_" are ignored by the
+# registry (src/sources.py, load_registry), so this one never runs; it is
+# checked by tests/test_docs.py so that it stays a valid example.
+#
+# One file per source, registry/<slug>.yaml, and nothing else lists sources:
+# scrape.py, the monitors, `cal` and the tests all read this directory. Let
+# `cal add` write the file (see .claude/skills/add-source/SKILL.md), then edit.
+
+name: Example Hall                 # the source_name its events carry; unique; never rename casually
+adapter: tribe                     # `cal adapters` lists them; `custom` for a hand-written scraper
+url: https://www.example.org/events/   # the page that lists events (or what `cal detect` suggested)
+params:                            # adapter options; `cal adapters` shows each adapter's
+  per_page: 50
+venue:                             # defaults for events that name no place of their own
+  name: Example Hall               # an event's own address always wins over these
+  street: 1 Main St
+  city: Oakland                    # spell it as calendar.config.yaml `region.cities` does
+  zip: "94612"                     # quoted: a ZIP is text
+runs_in_ci: true                   # false only if it must run on a person's machine (notes say why)
+status: active                     # active | blocked | retired (blocked and retired are not run)
+notes: >-
+  Anything a stranger would need in a year: why this endpoint rather than the
+  page, what is skipped and why, the spot checks made at onboarding
+  ("2026-10-06: Late Set Fri Oct 9 8:30 PM matches the event page").
+
+# ---------------------------------------------------------------------------
+# Variants (each replaces the matching lines above)
+#
+# A hand-written scraper, from src/scrapers/custom/_template.py:
+#   adapter: custom
+#   module: src.scrapers.custom.example_hall
+#   class: Scraper
+#   kind: playwright              # only if it drives a browser; custom defaults to requests
+#
+# A listings site covering many venues. It runs last and loses deduplication
+# to each venue's own source (Cambridge: a listings site filed as an ordinary
+# source took credit for ~50 venues' events):
+#   kind: aggregator
+#   (and no `venue:` block: its events are all over the region)
+#
+# A venue that refuses an honest client. No adapter, not run, kept as a
+# record and as the reason for the outreach email (docs/venue-outreach-email.md):
+#   name: Example Hall
+#   url: https://www.example.org/events/
+#   status: blocked
+#   runs_in_ci: false
+#   notes: >-
+#     2026-10-06: HTTP 403 with a Cloudflare "Just a moment..." challenge to
+#     plain HTTP with our user-agent. Not retried. Outreach email drafted in
+#     onboarding-report.md.
+#
+# A source that stopped being worth running:
+#   status: retired
+#   notes: >-
+#     2026-10-06: retired. Every event also appears in <other source> with
+#     real times; this one fabricated dates.
