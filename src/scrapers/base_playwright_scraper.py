@@ -194,7 +194,7 @@ class BasePlaywrightScraper(ABC):
         is not a hypothetical: the Longfellow House calendar yielded 54 cards
         when scraped alone and 4 inside a full run, because under load the first
         card existed long before the rest. It produced a silent partial
-        collapse — failure mode 1 in docs/ARCHITECTURE.md — with no error.
+        collapse — failure mode 1 in docs/architecture.md — with no error.
 
         Returns the settled count (0 if nothing ever appeared).
         """

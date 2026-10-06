@@ -205,8 +205,8 @@ class EventValidator:
         if event.start_datetime and event.start_datetime.hour >= 19:
             text = f"{event.title} {event.description}".lower()
             # Only tag as family-friendly if explicitly mentioned as family event
-            explicit_family = ['family friendly', 'family-friendly',
-                              'family event', 'family program', 'family fun', 'family day']
+            explicit_family = ['family friendly', 'family-friendly', 'family event',
+                               'family program', 'family fun', 'family day']
             if not any(phrase in text for phrase in explicit_family):
                 return False
 

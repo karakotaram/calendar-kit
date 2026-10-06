@@ -3,7 +3,7 @@ import hashlib
 import re
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, HttpUrl, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from enum import Enum
 from src.config import TZ as LOCAL_TZ  # the region's zone, from calendar.config.yaml
 

@@ -16,7 +16,7 @@ An hour of work and nothing accreted. That is what this fixes.
     cal diff                      what changed vs. last run or prod?    (layer 5)
     cal repair <source>           re-scrape one source and splice it in (layer 5)
 
-Run as `python -m src.cli <verb>`, or add the `cal` alias from docs/OPERATIONS.md.
+Run as `python -m src.cli <verb>`, or add the `cal` alias from docs/operations.md.
 """
 from __future__ import annotations
 
@@ -282,8 +282,8 @@ def cmd_scrape(args) -> int:
         path = _save_fixture(source)
         print(f"\n{OK} fixture saved to {path}")
 
-    if not args.dry_run:
-        print(f"\n{DOT} dry run only — nothing written. Use `cal repair {source.name}` to store this.")
+    # cal scrape never writes; say so, since it reads exactly like a run
+    print(f"\n{DOT} nothing written. Use `cal repair \"{source.name}\"` to store this.")
     return 0
 
 

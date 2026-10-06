@@ -45,7 +45,7 @@ def offline(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError(
             "network call in a test — parse a fixture instead "
-            "(see tests/conftest.py and docs/ROADMAP.md item 7)")
+            "(see tests/conftest.py)")
 
     monkeypatch.setattr(requests, "get", blocked)
     monkeypatch.setattr(requests, "post", blocked)

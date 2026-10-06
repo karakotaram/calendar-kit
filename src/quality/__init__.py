@@ -5,7 +5,7 @@ Two tiers, deliberately separate:
   invariants.py   absolute rules, no history needed, a violation means broken
   fingerprint.py  per-source shape compared to that source's own baseline
 
-See docs/ARCHITECTURE.md "Layer 2 — Contract" for why the distinction is
+See docs/architecture.md, "Layer 2: the contract", for why the distinction is
 load-bearing rather than stylistic.
 """
 from src.quality.invariants import Violation, check_invariants, errors
