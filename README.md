@@ -6,6 +6,15 @@ site. It is a generalized copy of the engine and site behind
 [cambridgecalendar.com](https://cambridgecalendar.com), which reads the venues
 in and around Cambridge, Massachusetts.
 
+> **Not affiliated with or endorsed by KQED.** This is an independent
+> prototype. It ships configured as "KQED Events", with a provisional theme
+> whose name, logo and favicon belong to KQED. They were taken from kqed.org,
+> not supplied or approved by KQED, and stand in until KQED's brand team
+> confirms or replaces them; see
+> [frontend/src/themes/kqed/README.md](frontend/src/themes/kqed/README.md).
+> `/new-calendar` replaces the name, and `brand.theme: default` in
+> `calendar.config.yaml` the theme.
+
 You give Claude Code a directory and a list of venue URLs. It works out which
 platform each venue's website runs on, reads the events with an existing
 adapter or writes a scraper for the ones that need it, tests each one against
